@@ -11,9 +11,6 @@ RUN npm ci --only=production
 # Copy source code
 COPY . .
 
-# Generate Prisma client
-RUN npx prisma generate
-
 # Create uploads directory
 RUN mkdir -p uploads retromail/uploads
 
