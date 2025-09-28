@@ -1,7 +1,6 @@
 import 'dotenv/config';  // Charge les variables d'environnement
 import express from 'express'
 import cors from 'cors'
-import { PrismaClient } from '@prisma/client'
 import multer from 'multer';             // npm i multer csv-parse
 import { parse } from 'csv-parse/sync';
 import { Parser } from 'json2csv'; // npm i json2csv
