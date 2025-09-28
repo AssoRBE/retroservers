@@ -6,10 +6,7 @@
   "scripts": {
     "dev": "node --watch ./src/server.js",
     "start": "node ./src/server.js",
-    "build": "npx prisma generate",
-    "postinstall": "npx prisma generate",
-    "vercel-build": "node build.js",
-    "seed": "node ./prisma/seed.js"
+    "vercel-build": "node build.js",  
   },
   "dependencies": {
     "@chakra-ui/icons": "^2.2.4",
