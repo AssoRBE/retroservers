@@ -26,7 +26,6 @@ const uploadReport = multer({
 });
 // --------------------------------------------------------------------
 
-const prisma = new PrismaClient()
 const app = express()
 
 // Configuration de synchronisation avec le site public
