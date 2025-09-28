@@ -2,24 +2,17 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
+# Copie les fichiers de dépendances
 COPY package*.json ./
 
-# Install dependencies
+# Installe les dépendances
 RUN npm ci --only=production
 
-# Copy source code
+# Copie le reste du code source
 COPY . .
 
-# Create uploads directory
-RUN mkdir -p uploads retromail/uploads
+# Crée le dossier uploads si besoin
+RUN mkdir -p uploads
 
-# Expose port
-EXPOSE 4000
-
-# Set environment
-ENV NODE_ENV=production
-ENV DATABASE_URL=file:./prisma/dev.db
-
-# Start application
-CMD ["node", "src/server.js"]
+# Démarre le serveur
+CMD ["node", "src/index.js"]
