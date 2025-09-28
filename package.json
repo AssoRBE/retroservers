@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "@chakra-ui/icons": "^2.2.4",
-    "@prisma/client": "^6.16.2",
     "cors": "^2.8.5",
     "csv-parse": "^5.3.8",
     "dotenv": "^17.2.2",
