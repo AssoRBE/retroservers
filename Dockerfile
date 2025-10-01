@@ -1,18 +1,27 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copie les fichiers de dépendances
+# Copier manifest
 COPY package*.json ./
+COPY prisma ./prisma
 
-# Installe les dépendances
-RUN npm ci --only=production
+# Installer (avec dev deps pour générer Prisma)
+RUN npm ci
 
-# Copie le reste du code source
+# Générer Prisma client
+RUN npx prisma generate
+
+# (Optionnel) appliquer migrations (si tu commits les migrations)
+# RUN npx prisma migrate deploy
+
+# Copier le reste
 COPY . .
 
-# Crée le dossier uploads si besoin
-RUN mkdir -p uploads
+# Optimiser: retirer dev deps (prisma) après génération
+RUN npm prune --production
 
-# Démarre le serveur
-CMD ["node", "src/index.js"]
+ENV NODE_ENV=production
+EXPOSE 4000
+
+CMD ["node", "src/server.js"]
