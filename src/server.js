@@ -63,13 +63,21 @@ const stringifyJsonField = (field) => {
   }
 };
 
+const API_BASE = process.env.PUBLIC_API_BASE || ''; // ou `https://${process.env.RAILWAY_STATIC_URL}` si fourni
+
+function absolutize(path) {
+  if (!path) return path;
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (!API_BASE) return path; // fallback relatif
+  return `${API_BASE}${path}`;
+}
+
 // Transform vehicle data for API responses
 const transformVehicle = (vehicle) => {
   if (!vehicle) return null;
-  let caract = {};
-  if (vehicle.caracteristiques) {
-    try { caract = JSON.parse(vehicle.caracteristiques); } catch {}
-  }
+  let caract = [];
+  try { caract = vehicle.caracteristiques ? JSON.parse(vehicle.caracteristiques) : []; } catch {}
+  const gallery = parseJsonField(vehicle.gallery) || [];
   return {
     id: vehicle.id,
     parc: vehicle.parc,
@@ -82,13 +90,11 @@ const transformVehicle = (vehicle) => {
     miseEnCirculation: vehicle.miseEnCirculation,
     energie: vehicle.energie,
     description: vehicle.description,
-    histoire: vehicle.history, // Alias pour le front
-    backgroundImage: vehicle.backgroundImage,
+    history: vehicle.history, // conserver la clé exacte attendue côté externe
+    backgroundImage: absolutize(vehicle.backgroundImage),
     backgroundPosition: vehicle.backgroundPosition,
-    gallery: parseJsonField(vehicle.gallery),
-    caracteristiques: caract, // pour debug ou réutilisation
-    // Déballer les champs utiles directement
-    ...caract
+    gallery: gallery.map(absolutize),
+    caracteristiques: caract
   };
 };
 
