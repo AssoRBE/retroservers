@@ -13,18 +13,21 @@ const PORT = process.env.PORT || 4000;
 // Config
 app.use(express.json());
 app.use(cors({
-  origin: [
-    'http://localhost:5173',     // Interne (Vite dev)
-    'http://localhost:4173',     // Interne (Vite preview) 
-    'http://localhost:3000',     // Externe
-    'http://localhost:5174',     // Au cas où
-    'https://www.association-rbe.fr',
-    'https://association-rbe.fr',
-    'https://retrobus-interne.fr',
-    'https://www.retrobus-interne.fr',  // ← AJOUTER CETTE LIGNE
-    'https://refreshing-adaptation-rbe-serveurs.up.railway.app', // Ton API elle-même
-    '*' // Temporaire - à enlever plus tard
-  ],
+  origin: (origin, cb) => {
+    const allowed = [
+      'http://localhost:5173',
+      'http://localhost:4173',
+      'http://localhost:3000',
+      'http://localhost:5174',
+      'https://www.association-rbe.fr',
+      'https://association-rbe.fr',
+      'https://retrobus-interne.fr',
+      'https://www.retrobus-interne.fr',
+      'https://refreshing-adaptation-rbe-serveurs.up.railway.app'
+    ];
+    if (!origin || allowed.includes(origin)) return cb(null, true);
+    return cb(new Error('Origin not allowed'));
+  },
   credentials: true
 }));
 
@@ -63,10 +66,29 @@ const stringifyJsonField = (field) => {
 // Transform vehicle data for API responses
 const transformVehicle = (vehicle) => {
   if (!vehicle) return null;
+  let caract = {};
+  if (vehicle.caracteristiques) {
+    try { caract = JSON.parse(vehicle.caracteristiques); } catch {}
+  }
   return {
-    ...vehicle,
-    caracteristiques: parseJsonField(vehicle.caracteristiques),
-    gallery: parseJsonField(vehicle.gallery)
+    id: vehicle.id,
+    parc: vehicle.parc,
+    type: vehicle.type,
+    modele: vehicle.modele,
+    marque: vehicle.marque,
+    subtitle: vehicle.subtitle,
+    immat: vehicle.immat,
+    etat: vehicle.etat,
+    miseEnCirculation: vehicle.miseEnCirculation,
+    energie: vehicle.energie,
+    description: vehicle.description,
+    histoire: vehicle.history, // Alias pour le front
+    backgroundImage: vehicle.backgroundImage,
+    backgroundPosition: vehicle.backgroundPosition,
+    gallery: parseJsonField(vehicle.gallery),
+    caracteristiques: caract, // pour debug ou réutilisation
+    // Déballer les champs utiles directement
+    ...caract
   };
 };
 
@@ -164,27 +186,86 @@ app.put('/vehicles/:parc', requireCreator, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
-    const {
-      etat, immat, energie, miseEnCirculation, modele, type,
-      marque, subtitle, description, history, caracteristiques, gallery
-    } = req.body || {};
-    
-    const data = {};
-    if (etat !== undefined) data.etat = etat;
-    if (immat !== undefined) data.immat = immat || null;
-    if (energie !== undefined) data.energie = energie || null;
-    if (modele !== undefined) data.modele = modele || '';
-    if (type !== undefined) data.type = type || 'Bus';
-    if (marque !== undefined) data.marque = marque || null;
-    if (subtitle !== undefined) data.subtitle = subtitle || null;
-    if (description !== undefined) data.description = description || null;
-    if (history !== undefined) data.history = history || null;
-    if (caracteristiques !== undefined) data.caracteristiques = stringifyJsonField(caracteristiques);
-    if (gallery !== undefined) data.gallery = stringifyJsonField(gallery);
-    if (miseEnCirculation !== undefined)
-      data.miseEnCirculation = miseEnCirculation ? new Date(miseEnCirculation) : null;
+    const body = { ...req.body };
 
-    const updated = await prisma.vehicle.update({ where: { parc }, data });
+    const existing = await prisma.vehicle.findUnique({ where: { parc } });
+    if (!existing) return res.status(404).json({ error: 'Véhicule introuvable' });
+
+    // Caractéristiques existantes
+    let caract = {};
+    if (existing.caracteristiques) {
+      try { caract = JSON.parse(existing.caracteristiques); } catch {}
+    }
+
+    const caractKeys = [
+      'fleetNumbers','constructeur','miseEnCirculationTexte',
+      'longueur','placesAssises','placesDebout','ufr',
+      'preservePar','normeEuro','moteur','boiteVitesses',
+      'nombrePortes','livree','girouette','climatisation'
+    ];
+
+    const directMap = {
+      modele: 'modele',
+      marque: 'marque',
+      subtitle: 'subtitle',
+      immat: 'immat',
+      etat: 'etat',
+      type: 'type',
+      energie: 'energie',
+      description: 'description',
+      histoire: 'history'
+    };
+
+    const dataUpdate = {};
+
+    Object.entries(directMap).forEach(([frontKey, dbKey]) => {
+      if (body[frontKey] !== undefined) {
+        dataUpdate[dbKey] = body[frontKey] === '' ? null : body[frontKey];
+        delete body[frontKey];
+      }
+    });
+
+    if (body.miseEnCirculation !== undefined) {
+      dataUpdate.miseEnCirculation = body.miseEnCirculation
+        ? new Date(body.miseEnCirculation)
+        : null;
+      delete body.miseEnCirculation;
+    }
+
+    caractKeys.forEach(k => {
+      if (body[k] !== undefined) {
+        if (body[k] === '' || body[k] === null) {
+          delete caract[k];
+        } else {
+          caract[k] = body[k];
+        }
+        delete body[k];
+      }
+    });
+
+    if (Array.isArray(body.caracteristiques)) {
+      dataUpdate.caracteristiques = JSON.stringify(body.caracteristiques);
+      delete body.caracteristiques;
+    }
+
+    if (body.backgroundImage !== undefined) {
+      dataUpdate.backgroundImage = body.backgroundImage; // null pour effacer OK
+      delete body.backgroundImage;
+    }
+    if (body.backgroundPosition !== undefined) {
+      dataUpdate.backgroundPosition = body.backgroundPosition;
+      delete body.backgroundPosition;
+    }
+
+    dataUpdate.caracteristiques = Object.keys(caract).length
+      ? JSON.stringify(caract)
+      : null;
+
+    const updated = await prisma.vehicle.update({
+      where: { parc },
+      data: dataUpdate
+    });
+
     res.json(transformVehicle(updated));
   } catch (e) {
     console.error(e);
