@@ -6,6 +6,8 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import QRCode from 'qrcode';
+import jwt from 'jsonwebtoken';
+import { USERS } from './auth/users.js';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -63,12 +65,12 @@ const stringifyJsonField = (field) => {
   }
 };
 
-const API_BASE = process.env.PUBLIC_API_BASE || ''; // ou `https://${process.env.RAILWAY_STATIC_URL}` si fourni
+const API_BASE = process.env.PUBLIC_API_BASE || '';
 
 function absolutize(path) {
   if (!path) return path;
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  if (!API_BASE) return path; // fallback relatif
+  if (!API_BASE) return path;
   return `${API_BASE}${path}`;
 }
 
@@ -90,11 +92,26 @@ const transformVehicle = (vehicle) => {
     miseEnCirculation: vehicle.miseEnCirculation,
     energie: vehicle.energie,
     description: vehicle.description,
-    history: vehicle.history, // conserver la clé exacte attendue côté externe
+    history: vehicle.history,
     backgroundImage: absolutize(vehicle.backgroundImage),
     backgroundPosition: vehicle.backgroundPosition,
     gallery: gallery.map(absolutize),
     caracteristiques: caract
+  };
+};
+
+const transformEvent = (evt) => {
+  if (!evt) return null;
+  return {
+    id: evt.id,
+    title: evt.title,
+    date: evt.date,
+    time: evt.time,
+    location: evt.location,
+    description: evt.description,
+    helloAssoUrl: evt.helloAssoUrl,
+    adultPrice: evt.adultPrice,
+    childPrice: evt.childPrice
   };
 };
 
@@ -108,13 +125,59 @@ const ensureDB = (res) => {
   return true;
 };
 
-const requireCreator = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || authHeader !== 'Bearer creator123') {
-    return res.status(401).json({ error: 'Unauthorized' });
+// Auth JWT
+const AUTH_SECRET = process.env.AUTH_SECRET || 'dev_insecure_secret';
+const TOKEN_TTL = process.env.TOKEN_TTL || '12h';
+
+function issueToken(payload) {
+  return jwt.sign(payload, AUTH_SECRET, { expiresIn: TOKEN_TTL });
+}
+
+function verifyToken(token) {
+  return jwt.verify(token, AUTH_SECRET);
+}
+
+function requireAuth(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing token' });
   }
-  next();
-};
+  const token = auth.slice(7);
+  try {
+    const decoded = verifyToken(token);
+    req.user = decoded;
+    next();
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+// Auth route
+app.post('/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username & password requis' });
+  }
+  const u = USERS[username.toLowerCase()];
+  if (!u || u.password !== password) {
+    return res.status(401).json({ error: 'Identifiants invalides' });
+  }
+  const token = issueToken({
+    sub: username.toLowerCase(),
+    prenom: u.prenom,
+    nom: u.nom,
+    roles: u.roles
+  });
+  res.json({
+    token,
+    user: {
+      username: username.toLowerCase(),
+      prenom: u.prenom,
+      nom: u.nom,
+      roles: u.roles
+    }
+  });
+});
 
 // ---------- File upload setup ----------
 const galleryStorage = multer.diskStorage({
@@ -128,8 +191,7 @@ const galleryStorage = multer.diskStorage({
 const uploadGallery = multer({ storage: galleryStorage });
 
 // ---------- Vehicle CRUD ----------
-
-app.get('/vehicles', requireCreator, async (_req, res) => {
+app.get('/vehicles', requireAuth, async (_req, res) => {
   if (!ensureDB(res)) return;
   try {
     const vehicles = await prisma.vehicle.findMany({
@@ -143,7 +205,7 @@ app.get('/vehicles', requireCreator, async (_req, res) => {
   }
 });
 
-app.get('/vehicles/:parc', requireCreator, async (req, res) => {
+app.get('/vehicles/:parc', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -156,7 +218,7 @@ app.get('/vehicles/:parc', requireCreator, async (req, res) => {
   }
 });
 
-app.post('/vehicles', requireCreator, async (req, res) => {
+app.post('/vehicles', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const {
@@ -188,7 +250,7 @@ app.post('/vehicles', requireCreator, async (req, res) => {
   }
 });
 
-app.put('/vehicles/:parc', requireCreator, async (req, res) => {
+app.put('/vehicles/:parc', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -197,7 +259,6 @@ app.put('/vehicles/:parc', requireCreator, async (req, res) => {
     const existing = await prisma.vehicle.findUnique({ where: { parc } });
     if (!existing) return res.status(404).json({ error: 'Véhicule introuvable' });
 
-    // Caractéristiques existantes
     let caract = {};
     if (existing.caracteristiques) {
       try { caract = JSON.parse(existing.caracteristiques); } catch {}
@@ -255,7 +316,7 @@ app.put('/vehicles/:parc', requireCreator, async (req, res) => {
     }
 
     if (body.backgroundImage !== undefined) {
-      dataUpdate.backgroundImage = body.backgroundImage; // null pour effacer OK
+      dataUpdate.backgroundImage = body.backgroundImage;
       delete body.backgroundImage;
     }
     if (body.backgroundPosition !== undefined) {
@@ -279,7 +340,7 @@ app.put('/vehicles/:parc', requireCreator, async (req, res) => {
   }
 });
 
-app.delete('/vehicles/:parc', requireCreator, async (req, res) => {
+app.delete('/vehicles/:parc', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -294,7 +355,7 @@ app.delete('/vehicles/:parc', requireCreator, async (req, res) => {
 // ---------- Galerie upload ----------
 app.use('/media/vehicles', express.static(path.join(process.cwd(), 'uploads', 'vehicles')));
 
-app.post('/vehicles/:parc/gallery', requireCreator, uploadGallery.array('images', 10), async (req, res) => {
+app.post('/vehicles/:parc/gallery', requireAuth, uploadGallery.array('images', 10), async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -317,7 +378,7 @@ app.post('/vehicles/:parc/gallery', requireCreator, uploadGallery.array('images'
   }
 });
 
-app.post('/vehicles/:parc/background', requireCreator, uploadGallery.single('image'), async (req, res) => {
+app.post('/vehicles/:parc/background', requireAuth, uploadGallery.single('image'), async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -336,8 +397,7 @@ app.post('/vehicles/:parc/background', requireCreator, uploadGallery.single('ima
   }
 });
 
-// Suppression d’une image de galerie (optionnel)
-app.delete('/vehicles/:parc/gallery', requireCreator, async (req, res) => {
+app.delete('/vehicles/:parc/gallery', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -405,7 +465,7 @@ app.get('/public/vehicles/:parc', async (req, res) => {
 });
 
 // ---------- QR Code ----------
-app.get('/vehicles/:parc/qr', requireCreator, async (req, res) => {
+app.get('/vehicles/:parc/qr', requireAuth, async (req, res) => {
   try {
     const { parc } = req.params;
     const url = `http://localhost:5173/vehicule/${parc}`;
@@ -418,7 +478,7 @@ app.get('/vehicles/:parc/qr', requireCreator, async (req, res) => {
 });
 
 // ---------- Usage tracking ----------
-app.get('/vehicles/:parc/usages', requireCreator, async (req, res) => {
+app.get('/vehicles/:parc/usages', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -433,7 +493,7 @@ app.get('/vehicles/:parc/usages', requireCreator, async (req, res) => {
   }
 });
 
-app.post('/vehicles/:parc/usages', requireCreator, async (req, res) => {
+app.post('/vehicles/:parc/usages', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -459,7 +519,7 @@ app.post('/vehicles/:parc/usages', requireCreator, async (req, res) => {
   }
 });
 
-app.put('/usages/:id', requireCreator, async (req, res) => {
+app.put('/usages/:id', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { id } = req.params;
@@ -484,7 +544,7 @@ app.put('/usages/:id', requireCreator, async (req, res) => {
   }
 });
 
-app.delete('/usages/:id', requireCreator, async (req, res) => {
+app.delete('/usages/:id', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { id } = req.params;
@@ -497,7 +557,7 @@ app.delete('/usages/:id', requireCreator, async (req, res) => {
 });
 
 // ---------- Maintenance reports ----------
-app.get('/vehicles/:parc/reports', requireCreator, async (req, res) => {
+app.get('/vehicles/:parc/reports', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -512,7 +572,7 @@ app.get('/vehicles/:parc/reports', requireCreator, async (req, res) => {
   }
 });
 
-app.post('/vehicles/:parc/reports', requireCreator, async (req, res) => {
+app.post('/vehicles/:parc/reports', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { parc } = req.params;
@@ -533,7 +593,7 @@ app.post('/vehicles/:parc/reports', requireCreator, async (req, res) => {
   }
 });
 
-app.put('/reports/:id', requireCreator, async (req, res) => {
+app.put('/reports/:id', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { id } = req.params;
@@ -555,7 +615,7 @@ app.put('/reports/:id', requireCreator, async (req, res) => {
   }
 });
 
-app.delete('/reports/:id', requireCreator, async (req, res) => {
+app.delete('/reports/:id', requireAuth, async (req, res) => {
   if (!ensureDB(res)) return;
   try {
     const { id } = req.params;
@@ -582,8 +642,129 @@ app.get('/flashes/all', async (_req, res) => {
   }
 });
 
+// ---------- Events (privé) ----------
+app.get('/events', requireAuth, async (_req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    const rows = await prisma.event.findMany({ orderBy: { date: 'asc' } });
+    res.json(rows.map(transformEvent));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Events fetch failed' });
+  }
+});
+
+app.get('/events/:id', requireAuth, async (req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    const evt = await prisma.event.findUnique({ where: { id: req.params.id } });
+    if (!evt) return res.status(404).json({ error: 'Not found' });
+    res.json(transformEvent(evt));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Event fetch failed' });
+  }
+});
+
+app.post('/events', requireAuth, async (req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    const b = req.body || {};
+    if (!b.id) return res.status(400).json({ error: 'id requis (slug)' });
+    const created = await prisma.event.create({
+      data: {
+        id: b.id,
+        title: b.title || '',
+        date: b.date ? new Date(b.date) : new Date(),
+        time: b.time || null,
+        location: b.location || null,
+        description: b.description || null,
+        helloAssoUrl: b.helloAssoUrl || null,
+        adultPrice: b.adultPrice ?? null,
+        childPrice: b.childPrice ?? null,
+        status: b.status || 'DRAFT',
+        layout: b.layout || null,
+        extras: b.extras ? JSON.stringify(b.extras) : null
+      }
+    });
+    res.status(201).json(transformEvent(created));
+  } catch (e) {
+    console.error(e);
+    if (e.code === 'P2002') return res.status(409).json({ error: 'ID déjà utilisé' });
+    res.status(500).json({ error: 'Event create failed' });
+  }
+});
+
+app.put('/events/:id', requireAuth, async (req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    const existing = await prisma.event.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const b = req.body || {};
+    const updated = await prisma.event.update({
+      where: { id: req.params.id },
+      data: {
+        title: b.title ?? existing.title,
+        date: b.date ? new Date(b.date) : existing.date,
+        time: b.time ?? existing.time,
+        location: b.location ?? existing.location,
+        description: b.description ?? existing.description,
+        helloAssoUrl: b.helloAssoUrl ?? existing.helloAssoUrl,
+        adultPrice: b.adultPrice ?? existing.adultPrice,
+        childPrice: b.childPrice ?? existing.childPrice,
+        status: b.status ?? existing.status,
+        layout: b.layout ?? existing.layout,
+        extras: b.extras ? JSON.stringify(b.extras) : existing.extras
+      }
+    });
+    res.json(transformEvent(updated));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Event update failed' });
+  }
+});
+
+app.delete('/events/:id', requireAuth, async (req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    await prisma.event.delete({ where: { id: req.params.id } });
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Event delete failed' });
+  }
+});
+
+// ---------- Events (public) ----------
+app.get('/public/events', async (_req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    const rows = await prisma.event.findMany({
+      where: { status: 'PUBLISHED' },
+      orderBy: { date: 'asc' }
+    });
+    res.json(rows.map(transformEvent));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Public events fetch failed' });
+  }
+});
+
+app.get('/public/events/:id', async (req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    const evt = await prisma.event.findUnique({ where: { id: req.params.id } });
+    if (!evt || evt.status !== 'PUBLISHED') return res.status(404).json({ error: 'Not found' });
+    res.json(transformEvent(evt));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Public event fetch failed' });
+  }
+});
+
 // ---------- Server start ----------
 app.listen(PORT, () => {
   console.log(`🚀 API Server running on http://localhost:${PORT}`);
 });
+
 export default app;
