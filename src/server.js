@@ -854,3 +854,15 @@ app.listen(PORT, () => {
 });
 
 export default app;
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS", 
+    "buildCommand": "npm install"
+  },
+  "deploy": {
+    "startCommand": "npx prisma migrate deploy && node src/server.js",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+}
