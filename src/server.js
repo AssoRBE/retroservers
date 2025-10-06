@@ -111,7 +111,13 @@ const transformEvent = (evt) => {
     description: evt.description,
     helloAssoUrl: evt.helloAssoUrl,
     adultPrice: evt.adultPrice,
-    childPrice: evt.childPrice
+    childPrice: evt.childPrice,
+    vehicleId: evt.vehicleId,        // ← Ajouté
+    status: evt.status,              // ← Ajouté (CRUCIAL pour le bouton)
+    layout: evt.layout,
+    extras: evt.extras,
+    createdAt: evt.createdAt,
+    updatedAt: evt.updatedAt
   };
 };
 
@@ -671,6 +677,7 @@ app.post('/events', requireAuth, async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.id) return res.status(400).json({ error: 'id requis (slug)' });
+
     const created = await prisma.event.create({
       data: {
         id: b.id,
@@ -682,6 +689,7 @@ app.post('/events', requireAuth, async (req, res) => {
         helloAssoUrl: b.helloAssoUrl || null,
         adultPrice: b.adultPrice ?? null,
         childPrice: b.childPrice ?? null,
+        vehicleId: b.vehicleId || null,
         status: b.status || 'DRAFT',
         layout: b.layout || null,
         extras: b.extras ? JSON.stringify(b.extras) : null
@@ -701,6 +709,7 @@ app.put('/events/:id', requireAuth, async (req, res) => {
     const existing = await prisma.event.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ error: 'Not found' });
     const b = req.body || {};
+
     const updated = await prisma.event.update({
       where: { id: req.params.id },
       data: {
@@ -712,6 +721,7 @@ app.put('/events/:id', requireAuth, async (req, res) => {
         helloAssoUrl: b.helloAssoUrl ?? existing.helloAssoUrl,
         adultPrice: b.adultPrice ?? existing.adultPrice,
         childPrice: b.childPrice ?? existing.childPrice,
+        vehicleId: b.vehicleId ?? existing.vehicleId,
         status: b.status ?? existing.status,
         layout: b.layout ?? existing.layout,
         extras: b.extras ? JSON.stringify(b.extras) : existing.extras
@@ -759,6 +769,81 @@ app.get('/public/events/:id', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Public event fetch failed' });
+  }
+});
+
+// ---------- Newsletter (Prisma) ----------
+const transformSubscriber = (s) => ({
+  id: s.id,
+  email: s.email,
+  status: s.status,
+  createdAt: s.createdAt,
+  updatedAt: s.updatedAt
+});
+
+// Liste complète (interne, protégée)
+app.get('/newsletter', requireAuth, async (_req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    const rows = await prisma.newsletterSubscriber.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(rows.map(transformSubscriber));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Fetch failed' });
+  }
+});
+
+// Inscription publique (externe)
+app.post('/newsletter/subscribe', async (req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    const { email } = req.body || {};
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Email invalide' });
+    }
+    const existing = await prisma.newsletterSubscriber.findUnique({
+      where: { email: email.toLowerCase() }
+    });
+    if (existing) {
+      return res.json({ ok: true, duplicated: true, subscriber: transformSubscriber(existing) });
+    }
+    const created = await prisma.newsletterSubscriber.create({
+      data: { email: email.toLowerCase(), status: 'CONFIRMED' }
+    });
+    res.json({ ok: true, subscriber: transformSubscriber(created) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Subscribe failed' });
+  }
+});
+
+// Ajout manuel interne
+app.post('/newsletter', requireAuth, async (req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    const { email, status } = req.body || {};
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'Email invalide' });
+    const created = await prisma.newsletterSubscriber.create({
+      data: { email: email.toLowerCase(), status: status || 'CONFIRMED' }
+    });
+    res.json(transformSubscriber(created));
+  } catch (e) {
+    if (e.code === 'P2002') return res.status(409).json({ error: 'Existe déjà' });
+    console.error(e);
+    res.status(500).json({ error: 'Create failed' });
+  }
+});
+
+app.delete('/newsletter/:id', requireAuth, async (req, res) => {
+  if (!ensureDB(res)) return;
+  try {
+    await prisma.newsletterSubscriber.delete({ where: { id: req.params.id } });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Delete failed' });
   }
 });
 
