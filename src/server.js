@@ -9,7 +9,6 @@ import QRCode from 'qrcode';
 import jwt from 'jsonwebtoken';
 import { USERS } from './auth/users.js';
 import { documentsAPI, upload } from './documents.js';
-import { passwordResetAPI } from './password-reset.js';
 import { newsletterService } from './newsletter-service.js';
 import bcrypt from 'bcrypt';
 
