@@ -73,7 +73,8 @@ const corsOptions = {
   credentials: true,
   optionsSuccessStatus: 204,
 };
-app.options('*', cors(corsOptions));
+// Express 5 + path-to-regexp v8: avoid '*' wildcard, use RegExp to match all
+app.options(/.*/, cors(corsOptions));
 
 // Health endpoints for platform checks
 app.get('/health', async (_req, res) => {
